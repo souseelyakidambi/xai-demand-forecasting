@@ -1,0 +1,13 @@
+,stores_near_zero,items_near_zero
+store,10,0
+item,0,50
+year,0,0
+month,0,0
+day_of_week,0,0
+week_of_year,0,0
+quarter,10,50
+is_weekend,10,50
+lag_7,0,0
+lag_30,0,0
+rolling_mean_7,0,0
+rolling_mean_30,0,0

@@ -1,0 +1,11 @@
+Required modules:
+pandas
+numpy
+scikit-learn
+xgboost
+shap
+matplotlib
+seaborn
+
+Run command:
+pip install pandas numpy scikit-learn xgboost shap matplotlib seaborn
