@@ -27,17 +27,27 @@ features = ['store','item','year','month','day_of_week','week_of_year',
             'quarter','is_weekend','lag_7','lag_30','rolling_mean_7','rolling_mean_30']
 
 # ── STUDY 1: SHAP BY STORE ───────────────────────────────────────────────────
+# FIX: Use temporal split so SHAP is computed on held-out future data only.
+# Model trained on earliest 80% of dates; SHAP evaluated on latest 20%.
+# Background sample drawn from training set to avoid leakage into explainer.
 print("Study 1: SHAP importance by store...")
 store_shap = {}
 for store_id in sorted(df['store'].unique()):
-    sub = df[df['store'] == store_id]
-    X, y = sub[features], sub['sales']
+    sub        = df[df['store'] == store_id].sort_values('date')
+    split_idx  = int(len(sub) * 0.8)
+    train_sub  = sub.iloc[:split_idx]
+    test_sub   = sub.iloc[split_idx:]
+    Xtr, ytr   = train_sub[features], train_sub['sales']
+    Xte        = test_sub[features]
+
     model = xgb.XGBRegressor(n_estimators=200, learning_rate=0.1,
                              max_depth=6, random_state=42, verbosity=0)
-    model.fit(X, y)
-    sample = X.sample(min(500, len(X)), random_state=42)
-    exp = shap.Explainer(model, X.sample(200, random_state=42))
-    sv  = exp(sample)
+    model.fit(Xtr, ytr)
+
+    # SHAP evaluated on test set; background from training set
+    sample = Xte.sample(min(500, len(Xte)), random_state=42)
+    exp    = shap.Explainer(model, Xtr.sample(min(500, len(Xtr)), random_state=42))
+    sv     = exp(sample)
     store_shap[store_id] = pd.Series(
         np.abs(sv.values).mean(axis=0), index=features)
     print(f"  Store {store_id} done")
@@ -45,18 +55,26 @@ for store_id in sorted(df['store'].unique()):
 store_shap_df = pd.DataFrame(store_shap).T
 store_shap_df.to_csv('output/shap_by_store.csv')
 
-# ── STUDY 2: SHAP BY ITEM CATEGORY ──────────────────────────────────────────
+# ── STUDY 2: SHAP BY ITEM ───────────────────────────────────────────────────
+# FIX: Same temporal split logic applied per item.
 print("\nStudy 2: SHAP importance by item...")
 item_shap = {}
 for item_id in sorted(df['item'].unique()):
-    sub = df[df['item'] == item_id]
-    X, y = sub[features], sub['sales']
+    sub        = df[df['item'] == item_id].sort_values('date')
+    split_idx  = int(len(sub) * 0.8)
+    train_sub  = sub.iloc[:split_idx]
+    test_sub   = sub.iloc[split_idx:]
+    Xtr, ytr   = train_sub[features], train_sub['sales']
+    Xte        = test_sub[features]
+
     model = xgb.XGBRegressor(n_estimators=200, learning_rate=0.1,
                              max_depth=6, random_state=42, verbosity=0)
-    model.fit(X, y)
-    sample = X.sample(min(500, len(X)), random_state=42)
-    exp = shap.Explainer(model, X.sample(200, random_state=42))
-    sv  = exp(sample)
+    model.fit(Xtr, ytr)
+
+    # SHAP evaluated on test set; background from training set
+    sample = Xte.sample(min(500, len(Xte)), random_state=42)
+    exp    = shap.Explainer(model, Xtr.sample(min(500, len(Xtr)), random_state=42))
+    sv     = exp(sample)
     item_shap[item_id] = pd.Series(
         np.abs(sv.values).mean(axis=0), index=features)
     print(f"  Item {item_id} done")
@@ -76,21 +94,25 @@ audit.to_csv('output/zero_contribution_audit.csv')
 print(audit)
 
 # ── STUDY 4: ACCURACY BY STORE ───────────────────────────────────────────────
+# Temporal split already applied in previous version — retained unchanged.
 print("\nStudy 4: Accuracy by store...")
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import train_test_split
 
 store_acc = {}
 for store_id in sorted(df['store'].unique()):
-    sub = df[df['store'] == store_id]
-    X, y = sub[features], sub['sales']
-    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=42)
+    sub_sorted = df[df['store'] == store_id].sort_values('date')
+    split_idx  = int(len(sub_sorted) * 0.8)
+    train_sub  = sub_sorted.iloc[:split_idx]
+    test_sub   = sub_sorted.iloc[split_idx:]
+    Xtr, ytr   = train_sub[features], train_sub['sales']
+    Xte, yte   = test_sub[features],  test_sub['sales']
+
     model = xgb.XGBRegressor(n_estimators=200, learning_rate=0.1,
                              max_depth=6, random_state=42, verbosity=0)
     model.fit(Xtr, ytr)
     preds = model.predict(Xte)
-    mape = np.mean(np.abs((yte - preds) / yte)) * 100
-    mae  = mean_absolute_error(yte, preds)
+    mape  = np.mean(np.abs((yte - preds) / yte)) * 100
+    mae   = mean_absolute_error(yte, preds)
     store_acc[store_id] = {'MAE': round(mae,4), 'MAPE': round(mape,4)}
     print(f"  Store {store_id}: MAE={mae:.4f}  MAPE={mape:.2f}%")
 
@@ -129,7 +151,6 @@ print("Item heatmap saved.")
 top_feature_store = store_shap_df.idxmax(axis=1)
 top_feature_item  = item_shap_df.idxmax(axis=1)
 
-unique_feats = list(set(list(top_feature_store) + list(top_feature_item)))
 color_map = {f: cm.tab10(i/10) for i, f in enumerate(features)}
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 4))
